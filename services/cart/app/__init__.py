@@ -1,51 +1,92 @@
 import os
 import time
+import logging
+
 from flask import Flask, jsonify, request
-from prometheus_client import make_wsgi_app, Counter, Histogram
+from prometheus_client import Counter, Histogram, make_wsgi_app
 from werkzeug.middleware.dispatcher import DispatcherMiddleware
 
-# Core Prometheus metrics
-REQUEST_COUNT = Counter('cart_requests_total', 'Total HTTP Requests', ['method', 'endpoint', 'status'])
-REQUEST_LATENCY = Histogram('cart_request_duration_seconds', 'HTTP Request Duration', ['method', 'endpoint'])
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    handlers=[logging.StreamHandler()],
+)
+logger = logging.getLogger(__name__)
+
+REQUEST_COUNT = Counter(
+    "cart_requests_total", "Total HTTP Requests", ["method", "endpoint", "status"]
+)
+REQUEST_LATENCY = Histogram(
+    "cart_request_duration_seconds", "HTTP Request Duration", ["method", "endpoint"]
+)
+
 
 def create_app():
     app = Flask("cart-service")
 
-    # Clean Domain dependencies initialized
-    from app.infrastructure.database import Database
-    from app.infrastructure.cache import Cache
+    from app.infrastructure.database import Database, CartRepository
+    from app.infrastructure.cache import Cache, CartCache
     from app.infrastructure.messaging import MessageBroker
+    from app.core.use_cases import (
+        GetCartUseCase,
+        AddToCartUseCase,
+        RemoveFromCartUseCase,
+    )
+    from app.api.routes import api_bp, init_routes
 
     db = Database()
+    cart_repo = CartRepository(db)
     cache = Cache()
+    cart_cache = CartCache(cache)
     broker = MessageBroker()
 
-    @app.route('/')
-    def index():
-        return jsonify({
-            "service": "cart-service",
-            "status": "UP",
-            "port": 5003,
-            "timestamp": time.time()
-        })
+    get_cart_uc = GetCartUseCase(cart_repo, cart_cache)
+    add_to_cart_uc = AddToCartUseCase(cart_repo, cart_cache, broker)
+    remove_from_cart_uc = RemoveFromCartUseCase(cart_repo, cart_cache, broker)
 
-    @app.route('/health')
+    init_routes(get_cart_uc, add_to_cart_uc, remove_from_cart_uc, db, cache)
+    app.register_blueprint(api_bp)
+
+    @app.route("/")
+    def index():
+        mode = (
+            "SANDBOX_MOCK_FALLBACK"
+            if (db.use_sqlite or cache.use_in_memory)
+            else "PRODUCTION"
+        )
+        return jsonify(
+            {
+                "service": "cart-service",
+                "status": "UP",
+                "mode": mode,
+                "port": int(os.getenv("PORT", 5003)),
+                "timestamp": time.time(),
+            }
+        )
+
+    @app.route("/health")
     def health():
         db_healthy = db.check_health()
         redis_healthy = cache.check_health()
-        kafka_healthy = broker.check_health()
-        
-        return jsonify({
-            "service": "cart-service",
-            "status": "UP",
-            "port": 5003,
-            "dependencies": {
-                "database": "UP" if db_healthy else "DOWN (Graceful Sandbox Fallback)",
-                "cache": "UP" if redis_healthy else "DOWN (Graceful Sandbox Fallback)",
-                "kafka": "UP" if kafka_healthy else "DOWN (Graceful Sandbox Fallback)"
-            },
-            "timestamp": time.time()
-        })
+        mode = (
+            "SANDBOX_MOCK_FALLBACK"
+            if (db.use_sqlite or cache.use_in_memory)
+            else "PRODUCTION"
+        )
+
+        return jsonify(
+            {
+                "service": "cart-service",
+                "status": "UP",
+                "mode": mode,
+                "port": int(os.getenv("PORT", 5003)),
+                "dependencies": {
+                    "database": "UP" if db_healthy else "DOWN (Fallback to SQLite in-memory active)",
+                    "cache": "UP" if redis_healthy else "DOWN (Fallback to In-memory Cache active)",
+                },
+                "timestamp": time.time(),
+            }
+        )
 
     @app.before_request
     def before_request():
@@ -53,19 +94,20 @@ def create_app():
 
     @app.after_request
     def after_request(response):
-        if hasattr(app, 'start_time'):
+        if hasattr(app, "start_time"):
             duration = time.time() - app.start_time
-            REQUEST_COUNT.labels(method=request.method, endpoint=request.path, status=response.status_code).inc()
-            REQUEST_LATENCY.labels(method=request.method, endpoint=request.path).observe(duration)
+            REQUEST_COUNT.labels(
+                method=request.method,
+                endpoint=request.path,
+                status=response.status_code,
+            ).inc()
+            REQUEST_LATENCY.labels(
+                method=request.method, endpoint=request.path
+            ).observe(duration)
         return response
 
-    # Mount Prometheus /metrics endpoint
-    app.wsgi_app = DispatcherMiddleware(app.wsgi_app, {
-        '/metrics': make_wsgi_app()
-    })
-
-    # Register API blueprint
-    from app.api.routes import api_bp
-    app.register_blueprint(api_bp, url_prefix='/api/v1')
+    app.wsgi_app = DispatcherMiddleware(
+        app.wsgi_app, {"/metrics": make_wsgi_app()}
+    )
 
     return app
