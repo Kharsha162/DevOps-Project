@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-service
+  namespace: ecommerce
+  labels:
+    app: order-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: order-service
+  template:
+    metadata:
+      labels:
+        app: order-service
+    spec:
+      containers:
+      - name: order-service
+        image: mycommerce/order-service:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 5004
+        resources:
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+          requests:
+            cpu: "250m"
+            memory: "256Mi"
+        env:
+        - name: PORT
+          value: "5004"
+        - name: DATABASE_URL
+          value: "postgresql://postgres:postgres@postgres-service:5432/ecommerce"
+        - name: REDIS_HOST
+          value: "redis-service"
+        - name: REDIS_PORT
+          value: "6379"
+        - name: KAFKA_BOOTSTRAP_SERVERS
+          value: "kafka-service:9092"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 5004
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 5004
+          initialDelaySeconds: 5
+          periodSeconds: 10

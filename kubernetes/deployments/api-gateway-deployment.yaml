@@ -1,0 +1,37 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-gateway
+  namespace: ecommerce
+  labels:
+    app: api-gateway
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: api-gateway
+  template:
+    metadata:
+      labels:
+        app: api-gateway
+    spec:
+      containers:
+      - name: api-gateway
+        image: mycommerce/api-gateway:latest
+        ports:
+        - containerPort: 5000
+        env:
+        - name: PORT
+          value: "5000"
+        - name: AUTH_SERVICE_URL
+          value: "http://auth-service:5001"
+        - name: PRODUCT_SERVICE_URL
+          value: "http://product-service:5002"
+        - name: CART_SERVICE_URL
+          value: "http://cart-service:5003"
+        - name: ORDER_SERVICE_URL
+          value: "http://order-service:5004"
+        - name: PAYMENT_SERVICE_URL
+          value: "http://payment-service:5005"
+        - name: NOTIFICATION_SERVICE_URL
+          value: "http://notification-service:5006"
