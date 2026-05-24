@@ -1,17 +1,26 @@
 import os
 import time
+import logging
 from flask import Flask, jsonify, request
 from prometheus_client import make_wsgi_app, Counter, Histogram
 from werkzeug.middleware.dispatcher import DispatcherMiddleware
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s %(levelname)s %(name)s %(message)s'
+)
+logger = logging.getLogger("product-service")
 
 # Core Prometheus metrics
 REQUEST_COUNT = Counter('product_requests_total', 'Total HTTP Requests', ['method', 'endpoint', 'status'])
 REQUEST_LATENCY = Histogram('product_request_duration_seconds', 'HTTP Request Duration', ['method', 'endpoint'])
 
+
 def create_app():
     app = Flask("product-service")
+    app.logger = logger
+    app.logger.setLevel(logging.INFO)
 
-    # Clean Domain dependencies initialized
     from app.infrastructure.database import Database
     from app.infrastructure.cache import Cache
     from app.infrastructure.messaging import MessageBroker
@@ -25,7 +34,7 @@ def create_app():
         return jsonify({
             "service": "product-service",
             "status": "UP",
-            "port": 5002,
+            "port": int(os.getenv("PORT", 5002)),
             "timestamp": time.time()
         })
 
@@ -33,17 +42,21 @@ def create_app():
     def health():
         db_healthy = db.check_health()
         redis_healthy = cache.check_health()
-        kafka_healthy = broker.check_health()
-        
+        kafka_required = os.getenv("KAFKA_BOOTSTRAP_SERVERS") is not None
+        kafka_healthy = broker.check_health() if kafka_required else None
+
+        dependencies = {
+            "database": "UP" if db_healthy else "DOWN",
+            "cache": "UP" if redis_healthy else "DOWN"
+        }
+        if kafka_required:
+            dependencies["kafka"] = "UP" if kafka_healthy else "DOWN"
+
         return jsonify({
             "service": "product-service",
-            "status": "UP",
-            "port": 5002,
-            "dependencies": {
-                "database": "UP" if db_healthy else "DOWN (Graceful Sandbox Fallback)",
-                "cache": "UP" if redis_healthy else "DOWN (Graceful Sandbox Fallback)",
-                "kafka": "UP" if kafka_healthy else "DOWN (Graceful Sandbox Fallback)"
-            },
+            "status": "UP" if db_healthy and redis_healthy else "DEGRADED",
+            "port": int(os.getenv("PORT", 5002)),
+            "dependencies": dependencies,
             "timestamp": time.time()
         })
 
@@ -64,8 +77,7 @@ def create_app():
         '/metrics': make_wsgi_app()
     })
 
-    # Register API blueprint
     from app.api.routes import api_bp
-    app.register_blueprint(api_bp, url_prefix='/api/v1')
+    app.register_blueprint(api_bp, url_prefix='')
 
     return app

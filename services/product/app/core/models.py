@@ -1,11 +1,18 @@
-class ProductEntity:
-    def __init__(self, id, data):
+class Product:
+    def __init__(self, id, name, description, price, stock, category="general"):
         self.id = id
-        self.data = data
+        self.name = name
+        self.description = description
+        self.price = float(price)
+        self.stock = int(stock)
+        self.category = category
 
     def to_dict(self):
         return {
             "id": self.id,
-            "data": self.data,
-            "type": "product"
+            "name": self.name,
+            "description": self.description,
+            "price": self.price,
+            "stock": self.stock,
+            "category": self.category
         }
