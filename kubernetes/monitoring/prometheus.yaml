@@ -7,17 +7,33 @@ data:
   prometheus.yml: |
     global:
       scrape_interval: 15s
+      evaluation_interval: 15s
     scrape_configs:
-      - job_name: 'kubernetes-apiservers'
-        kubernetes_sd_configs:
-        - role: apiserver
-      - job_name: 'flask-microservices'
+      - job_name: 'api-gateway'
+        metrics_path: /metrics
         static_configs:
-        - targets: 
-          - 'auth-service:5001'
-          - 'product-service:5002'
-          - 'cart-service:5003'
-          - 'order-service:5004'
-          - 'payment-service:5005'
-          - 'notification-service:5006'
-          - 'api-gateway:5000'
+          - targets: ['api-gateway-service:5000']
+      - job_name: 'auth-service'
+        metrics_path: /metrics
+        static_configs:
+          - targets: ['auth-service:5001']
+      - job_name: 'product-service'
+        metrics_path: /metrics
+        static_configs:
+          - targets: ['product-service:5002']
+      - job_name: 'cart-service'
+        metrics_path: /metrics
+        static_configs:
+          - targets: ['cart-service:5003']
+      - job_name: 'order-service'
+        metrics_path: /metrics
+        static_configs:
+          - targets: ['order-service:5004']
+      - job_name: 'payment-service'
+        metrics_path: /metrics
+        static_configs:
+          - targets: ['payment-service:5005']
+      - job_name: 'notification-service'
+        metrics_path: /metrics
+        static_configs:
+          - targets: ['notification-service:5006']

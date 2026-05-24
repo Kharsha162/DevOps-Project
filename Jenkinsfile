@@ -2,8 +2,9 @@ pipeline {
     agent any
 
     environment {
-        DOCKER_REGISTRY = 'docker.io/mycommerce'
-        BUILD_TAG = "build-${BUILD_NUMBER}"
+        DOCKER_REGISTRY = 'mycommerce'
+        BUILD_TAG = "${env.BUILD_NUMBER ?: 'latest'}"
+        K8S_NAMESPACE = 'ecommerce'
     }
 
     stages {
@@ -13,101 +14,100 @@ pipeline {
             }
         }
 
-        stage('Code Quality & Lint') {
+        stage('Test Services') {
             parallel {
-                stage('Lint Gateway') {
+                stage('Test Auth') {
                     steps {
-                        echo 'Linting API Gateway...'
+                        dir('services/auth') {
+                            sh 'pip install -q -r requirements.txt PyJWT==2.8.0'
+                            sh 'python -c "from app import create_app; create_app()"'
+                        }
                     }
                 }
-                stage('Lint Auth Service') {
+                stage('Test Product') {
                     steps {
-                        echo 'Linting Auth Service...'
+                        dir('services/product') {
+                            sh 'pip install -q -r requirements.txt'
+                            sh 'python -c "from app import create_app; create_app()"'
+                        }
                     }
                 }
-                stage('Lint Product Service') {
+                stage('Test Cart') {
                     steps {
-                        echo 'Linting Product Service...'
+                        dir('services/cart') {
+                            sh 'pip install -q -r requirements.txt'
+                            sh 'python -c "from app import create_app; create_app()"'
+                        }
                     }
                 }
-                stage('Lint Cart Service') {
+                stage('Test Gateway') {
                     steps {
-                        echo 'Linting Cart Service...'
-                    }
-                }
-                stage('Lint Order Service') {
-                    steps {
-                        echo 'Linting Order Service...'
-                    }
-                }
-                stage('Lint Payment Service') {
-                    steps {
-                        echo 'Linting Payment Service...'
-                    }
-                }
-                stage('Lint Notification Service') {
-                    steps {
-                        echo 'Linting Notification Service...'
-                    }
-                }
-                stage('Lint Frontend') {
-                    steps {
-                        echo 'Linting React Frontend...'
-                    }
-                }
-            }
-        }
-
-        stage('Unit Testing') {
-            parallel {
-                stage('Test Microservices') {
-                    steps {
-                        echo 'Running python unit tests for microservices...'
+                        dir('api-gateway') {
+                            sh 'pip install -q -r requirements.txt'
+                            sh 'python -c "from app import create_app; create_app()"'
+                        }
                     }
                 }
                 stage('Test Frontend') {
                     steps {
-                        echo 'Running react frontend unit tests...'
+                        dir('frontend') {
+                            sh 'npm ci || npm install'
+                            sh 'npm run build'
+                        }
                     }
                 }
             }
         }
 
-        stage('Dockerize & Build') {
+        stage('Docker Build') {
             steps {
                 script {
-                    echo "Building Docker Images for Tag: ${env.BUILD_TAG}..."
-                    // docker.build("${DOCKER_REGISTRY}/auth-service:${BUILD_TAG}", "./services/auth")
-                    // docker.build("${DOCKER_REGISTRY}/product-service:${BUILD_TAG}", "./services/product")
-                    // ... repeated for each service
+                    def services = [
+                        'api-gateway',
+                        'frontend',
+                        'auth:auth-service',
+                        'product:product-service',
+                        'cart:cart-service',
+                        'order:order-service',
+                        'payment:payment-service',
+                        'notification:notification-service'
+                    ]
+                    services.each { entry ->
+                        def parts = entry.split(':')
+                        def dir = parts[0] == 'api-gateway' ? 'api-gateway' : (parts[0] == 'frontend' ? 'frontend' : "services/${parts[0]}")
+                        def image = parts.size() > 1 ? parts[1] : parts[0]
+                        sh "docker build -t ${DOCKER_REGISTRY}/${image}:${BUILD_TAG} ${dir}"
+                        sh "docker tag ${DOCKER_REGISTRY}/${image}:${BUILD_TAG} ${DOCKER_REGISTRY}/${image}:latest"
+                    }
                 }
             }
         }
 
-        stage('Security Scanning') {
+        stage('Deploy Kubernetes') {
             steps {
-                echo 'Running Trivy Vulnerability Scan on built images...'
+                sh '''
+                    kubectl apply -f kubernetes/namespace.yaml
+                    kubectl apply -f kubernetes/secrets/
+                    kubectl apply -f kubernetes/configmaps/
+                    kubectl apply -f kubernetes/storage/
+                    kubectl apply -f kubernetes/deployments/postgres-deployment.yaml
+                    kubectl apply -f kubernetes/deployments/redis-deployment.yaml
+                    kubectl apply -f kubernetes/deployments/kafka-deployment.yaml
+                    kubectl apply -f kubernetes/services/postgres-service.yaml
+                    kubectl apply -f kubernetes/services/redis-service.yaml
+                    kubectl apply -f kubernetes/deployments/
+                    kubectl apply -f kubernetes/services/
+                    kubectl apply -f kubernetes/monitoring/
+                    kubectl apply -f kubernetes/hpa/
+                    kubectl apply -f kubernetes/ingress/
+                '''
             }
         }
 
-        stage('Push to Registry') {
+        stage('Verify Deployment') {
             steps {
-                script {
-                    echo "Pushing images to Docker Registry..."
-                    // docker.withRegistry('', 'docker-registry-credentials') {
-                    //     authImg.push("${env.BUILD_TAG}")
-                    // }
-                }
-            }
-        }
-
-        stage('Deploy to Kubernetes') {
-            steps {
-                script {
-                    echo 'Applying K8s deployment manifests...'
-                    // sh "kubectl apply -f kubernetes/deployments/"
-                    // sh "kubectl apply -f kubernetes/services/"
-                }
+                sh 'kubectl rollout status deployment/api-gateway -n ecommerce --timeout=120s || true'
+                sh 'kubectl get pods -n ecommerce'
             }
         }
     }
@@ -117,7 +117,8 @@ pipeline {
             echo 'Pipeline completed successfully!'
         }
         failure {
-            echo 'Pipeline failed. Sending alert to team...'
+            echo 'Pipeline failed — rolling back api-gateway deployment...'
+            sh 'kubectl rollout undo deployment/api-gateway -n ecommerce || true'
         }
     }
 }

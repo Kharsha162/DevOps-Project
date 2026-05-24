@@ -1,61 +1,90 @@
-# Production-Grade Cloud-Native E-Commerce Platform
+# Production-Grade Cloud-Native E-Commerce DevOps Platform
 
-Welcome to the Cloud-Native E-Commerce platform. This platform is built using a highly resilient microservices architecture, clean domain-driven architecture, and industry-standard DevOps tools.
+Full-stack microservices platform with React frontend, Flask microservices, Docker, Kubernetes, Jenkins CI/CD, PostgreSQL, Redis, Prometheus, and Grafana.
 
-## Architecture Topology
+## Architecture
 
 ```
-                  [ Users ]
-                      ↓
-               [ React Frontend ] (Port 3000)
-                      ↓
-               [ NGINX Ingress ]
-                      ↓
-               [ API Gateway ] (Port 5000)
-                      ↓
-   +------------------+------------------+------------------+------------------+
-   ↓                  ↓                  ↓                  ↓                  ↓
-[Auth] (5001)    [Product] (5002)   [Cart] (5003)      [Order] (5004)    [Payment] (5005)
-   ↓                  ↓                  ↓                  ↓                  ↓
- [Redis]         [Postgres]          [Redis]           [Postgres]          [Kafka]
-                                                                               ↓
-                                                                        [Notification] (5006)
+Developer → Git/GitHub → Jenkins CI/CD → Docker → Kubernetes
+                              ↓
+React Frontend → API Gateway → Microservices (Auth, Product, Cart, Order, Payment, Notification)
+                              ↓
+                    PostgreSQL + Redis + Kafka
+                              ↓
+                    HPA Auto Scaling → Prometheus → Grafana
 ```
 
-## Service Details & Port Map
+## Quick Start (Docker Compose)
 
-| Component | Port | Description | DB / Cache | Messaging |
-| :--- | :---: | :--- | :--- | :--- |
-| **React Frontend** | `3000` | UI Dashboard & E-Commerce Flow | - | - |
-| **API Gateway** | `5000` | Central Entry point, routes downstream | - | - |
-| **Auth Service** | `5001` | JWT creation, verification & user admin | Redis | - |
-| **Product Service** | `5002` | Catalog management, updates & caching | PostgreSQL | - |
-| **Cart Service** | `5003` | Add/Remove items, ephemeral state | Redis | - |
-| **Order Service** | `5004` | Order placement, tracking & updates | PostgreSQL | Kafka (Producer) |
-| **Payment Service** | `5005` | Processing payments, stripe simulator | PostgreSQL | Kafka (Producer) |
-| **Notification Service** | `5006` | Email / SMS dispatcher | - | Kafka (Consumer) |
+```bash
+docker compose up --build -d
+```
 
-## Getting Started Locally
+| Service | URL |
+|---------|-----|
+| Frontend | http://localhost:3000 |
+| API Gateway | http://localhost:5000 |
+| Auth | http://localhost:5001 |
+| Product | http://localhost:5002 |
+| Cart | http://localhost:5003 |
 
-### Prerequisites
-* Python 3.13+
-* Node.js & npm (for frontend)
-* Docker & docker-compose
-
-### Running Services Directly
-To start the services locally for validation, you can use the verification runner script or start them manually.
-Run this in separate shell windows:
+## Kubernetes Deployment
 
 ```powershell
-# In root directory
-python -m venv venv
-.\venv\Scripts\activate
-pip install -r api-gateway/requirements.txt
-python api-gateway/run.py
+.\scripts\deploy-k8s.ps1
+kubectl get pods -n ecommerce
 ```
-Do the same for each service in `services/<service_name>/`.
 
-### Running with Docker Compose
-```bash
-docker-compose up --build
+## Verify Platform
+
+```powershell
+.\scripts\verify-platform.ps1
 ```
+
+## Phase Completion Status
+
+| Phase | Component | Status |
+|-------|-----------|--------|
+| 1 | Project Init + Git + GitHub | ✅ |
+| 2 | Auth Service (JWT, PostgreSQL, Redis) | ✅ |
+| 3 | Product Service (CRUD, search, cache) | ✅ |
+| 4 | Cart Service (PostgreSQL, Redis cache) | ✅ |
+| 5 | API Gateway (JWT, rate limiting, routing) | ✅ |
+| 6 | React Frontend + Dashboard | ✅ |
+| 7 | Docker Compose (healthchecks, networks) | ✅ |
+| 8 | Kubernetes (deployments, secrets, PV/PVC) | ✅ |
+| 9 | HPA Auto Scaling (CPU + memory) | ✅ |
+| 10 | Prometheus + Grafana | ✅ |
+| 11 | Jenkins CI/CD Pipeline | ✅ |
+
+## API Examples
+
+```bash
+# Register
+curl -X POST http://localhost:5000/api/v1/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"username":"demo","email":"demo@test.com","password":"secret123"}'
+
+# Login
+curl -X POST http://localhost:5000/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"demo","password":"secret123"}'
+
+# Products (public)
+curl http://localhost:5000/api/v1/products
+
+# Add to cart (JWT required)
+curl -X POST http://localhost:5000/api/v1/cart/add \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <token>" \
+  -d '{"product_id":"p1","name":"Widget","price":9.99,"quantity":1}'
+```
+
+## Monitoring
+
+- **Prometheus:** `kubectl port-forward svc/prometheus-service 9090:9090 -n ecommerce`
+- **Grafana:** `kubectl port-forward svc/grafana-service 3001:3000 -n ecommerce` (admin / admin)
+
+## Repository
+
+https://github.com/Kharsha162/DevOps-Project
