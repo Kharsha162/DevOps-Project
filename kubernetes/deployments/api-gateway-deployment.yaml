@@ -23,6 +23,10 @@ spec:
         env:
         - name: PORT
           value: "5000"
+        - name: JWT_SECRET
+          value: "super-secret-key-998877"
+        - name: RATE_LIMIT_PER_MINUTE
+          value: "120"
         - name: AUTH_SERVICE_URL
           value: "http://auth-service:5001"
         - name: PRODUCT_SERVICE_URL
@@ -35,3 +39,15 @@ spec:
           value: "http://payment-service:5005"
         - name: NOTIFICATION_SERVICE_URL
           value: "http://notification-service:5006"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 5000
+          initialDelaySeconds: 10
+          periodSeconds: 20
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 5000
+          initialDelaySeconds: 5
+          periodSeconds: 10
